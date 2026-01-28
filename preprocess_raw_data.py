@@ -11,7 +11,7 @@ unclean_df = df[df['clean'] == 0].sample(n=400, random_state=42)
 combined_df = pd.concat([clean_df, unclean_df]).sample(frac=1, random_state=42).reset_index(drop=True)
 
 # 4. 통합 데이터셋 저장
-combined_df.to_csv('llm_dataset.tsv', sep='\t', index=False, encoding='utf-8-sig')
+combined_df.to_csv('hate_speech_dataset_v1.csv', sep='\t', index=False, encoding='utf-8-sig')
 
 # 5. 결과 확인
 print(f"Dataset integration complete. Total rows: {len(combined_df)}")
