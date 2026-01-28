@@ -1,17 +1,17 @@
 import pandas as pd
 
-# 1. 원본 데이터 로드
-# TSV 파일이므로 탭(\t) 구분자를 지정하여 읽어옵니다.
-train_df = pd.read_csv('train.tsv', sep='\t')
-dev_df = pd.read_csv('dev.tsv', sep='\t')
+# 1. 데이터 로드
+df = pd.read_csv('unsmile_train_v1.0.tsv', sep='\t')
 
-# 2. 데이터 병합
-# 두 데이터를 하나로 합치고, ignore_index를 통해 인덱스를 재정렬합니다.
-combined_df = pd.concat([train_df, dev_df], ignore_index=True)
+# 2. 정상(600개) 및 비정상(400개) 데이터 샘플링
+clean_df = df[df['clean'] == 1].sample(n=600, random_state=42)
+unclean_df = df[df['clean'] == 0].sample(n=400, random_state=42)
 
-# 3. 통합 데이터 저장
-# 분석 및 검열 작업에 사용할 마스터 데이터셋을 TSV 형식으로 저장합니다.
+# 3. 데이터 병합 및 섞기
+combined_df = pd.concat([clean_df, unclean_df]).sample(frac=1, random_state=42).reset_index(drop=True)
+
+# 4. 통합 데이터셋 저장
 combined_df.to_csv('llm_dataset.tsv', sep='\t', index=False, encoding='utf-8-sig')
 
-# 4. 결과 확인
+# 5. 결과 확인
 print(f"Dataset integration complete. Total rows: {len(combined_df)}")
