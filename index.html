@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JARVIS System - R&D MLOps Pipeline</title>
     <style>
-        /* [UI Rendering] 원형 홀로그램 시각화 (CSS Animation) */
+        /* 🌟 주현이의 시그니처 원형 홀로그램 UI 디자인 */
         body {
             background-color: #050505;
             color: #00f0ff;
@@ -98,34 +98,13 @@
     </div>
 
     <script>
-        // [System States] 전역 상태 변수 관리
+        // [System States] 전역 상태 변수
         let renderer = false; 
         let chatHistory = [];         
         let isJarvisSpeaking = false; 
 
-        /* ====================================================================
-        [Voice Recognition & Filtering Module]
-        - 현재 데모/개발 환경 상 텍스트 입력 모드 테스트를 위해 임시 비활성화 처리
-        - Web Audio API를 활용한 특정 사용자(주현) 목소리 주파수 필터링 로직 포함
-        ====================================================================
-        let recognition;
-        let isListening = false;
-        let isFirstCall = true;       
-        let audioContext;
-        let analyser;
-        let microphoneStream;
-        let isUserVoiceValid = false; 
-        */
-
         // [TTS (Text-to-Speech) Module] 시스템 응답 음성 출력 로직
         function speak(text) {
-            /*
-            if (recognition) {
-                try { recognition.stop(); } catch(e) {}
-                isListening = false;
-            }
-            */
-
             isJarvisSpeaking = true; 
 
             const utterance = new SpeechSynthesisUtterance(text);
@@ -133,12 +112,6 @@
 
             utterance.onend = function() {
                 isJarvisSpeaking = false; 
-                /*
-                if (recognition) {
-                    try { recognition.start(); isListening = true; } 
-                    catch(e) { console.log("[System Log] 마이크 재시작 무시"); }
-                }
-                */
             };
 
             window.speechSynthesis.speak(utterance);
@@ -147,7 +120,7 @@
         // [LLM Inference Module] 커스텀 백엔드(Hugging Face Docker) 통신 로직
         async function fetchToGemma(userQuestion) {
             try {
-                // 시스템 프롬프트: 페르소나 부여 및 논리 추론 지침 세팅
+                // 시스템 프롬프트 세팅
                 const systemPrompt = `너는 오직 주인님(주현)만을 위해 작동하는 스마트한 개인 AI 비서 '자비스'다. 다음 지침을 절대적으로 준수하라.
 1. [필수 프로토콜] 답변의 첫마디는 무조건 "네, 주인님."으로 시작하라.
 2. [논리 추론] 단계별로 차근차근 추론(Step-by-step thinking)하여 가장 최적화된 답변을 제공하라.
@@ -155,7 +128,7 @@
 
                 let messages = [{ role: "system", content: systemPrompt }];
 
-                // [Context Management] 최근 대화 히스토리를 큐(Queue) 방식으로 누적하여 문맥 유지
+                // 과거 대화 맥락 기억 유기적 누적 (최근 5개)
                 chatHistory.forEach(chat => {
                     messages.push({ role: "user", content: chat.user });
                     messages.push({ role: "assistant", content: chat.model });
@@ -163,7 +136,7 @@
 
                 messages.push({ role: "user", content: userQuestion });
 
-                // 백엔드 엔드포인트 비동기 호출 (REST API POST)
+                // 🌟 버셀(프론트)에서 허깅페이스 스페이스(백엔드 도커) 엔드포인트 타격!
                 const response = await fetch("https://banjl4487-jarvis-habe-project.hf.space/v1/chat/completions", { 
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -174,12 +147,12 @@
                     })
                 });
 
-                if (!response.ok) throw new Error(`Backend Status: ${response.status}`);
+                if (!response.ok) throw new Error(`도커 백엔드 응답 실패: ${response.status}`);
 
                 const result = await response.json();
                 let reply = result.choices[0].message.content.trim();
 
-                // 대화 히스토리 메모리 최적화 (최대 5개 유지)
+                // 대화 히스토리 메모리 최적화
                 chatHistory.push({ user: userQuestion, model: reply });
                 if (chatHistory.length > 5) chatHistory.shift(); 
 
@@ -187,36 +160,52 @@
 
             } catch (error) {
                 console.error("[Error Log] 백엔드 파이프라인 통신 장애:", error);
-                speak("네, 주인님. 현재 서버 인프라 연결이 원활하지 않습니다.");
+                speak("네, 주인님. 현재 서버 연결이 원활하지 않습니다.");
                 isJarvisSpeaking = false; 
             }
         }
 
-        /* ====================================================================
-        [Audio Analysis & Command Handler] 임시 비활성화
-        - startAudioAnalysis(): 실시간 오디오 버퍼 분석 및 특정 대역폭 필터링
-        - handleVoiceCommand(): STT 텍스트 파싱 및 커맨드 분기 처리
-        ====================================================================
-        */
-
-        // [Event Handler] 시스템 렌더링 초기화
+        // [Event Handler] 시스템 렌더링 초기화 및 상태 변경
         document.body.onclick = async (event) => {
-            // [Event Bubbling 防禦] 텍스트 입력창 클릭 시 백그라운드 이벤트 트리거 방지
+            // 🚨 텍스트 입력창 클릭 시 백그라운드 클릭 이벤트 무시
             if(event.target.closest('#text-input-container')) return;
 
             if (!renderer) {
                 initJarvis(); 
-                document.getElementById('status').innerText = "SYSTEM ONLINE (TEXT MODE)";
+                const statusEl = document.getElementById('status');
+                if (statusEl) statusEl.innerText = "SYSTEM ONLINE (TEXT MODE)";
             }
             
-            /*
+            /* ====================================================================
+            [Voice Recognition & Filtering Module] 임시 비활성화 영역
+            - 기기에 물리적인 마이크가 없어서 발생하는 NotFoundError 방지
+            - 추후 모바일이나 마이크 있는 환경에서 테스트 시 아래 주석 해제
+            ====================================================================
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                ... (중략) ...
+                microphoneStream = stream;
+                
+                startAudioAnalysis(stream);
+
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'ko-KR';
+
+                recognition.onresult = function(event) {
+                    const speechResult = event.results[event.resultIndex][0].transcript.trim();
+                    console.log("인식된 대사:", speechResult);
+                    handleVoiceCommand(speechResult);
+                };
+
+                recognition.start();
+                isListening = true;
+                
             } catch(e) {
                 console.error("[System Log] 마이크 매핑 실패:", e);
             }
-            */
+            ==================================================================== */
         };
 
         // [Visualization] 3D 코어 활성화
@@ -235,7 +224,7 @@
             console.log("[Data Transmission] Payload:", text);
             
             inputField.value = ""; // 폼 초기화
-            fetchToGemma(text); // 추론 모듈로 데이터 파이프라이닝
+            fetchToGemma(text); // 백엔드로 텍스트 발사!
         }
 
         // [Event Listener] 엔터키 전송 지원
