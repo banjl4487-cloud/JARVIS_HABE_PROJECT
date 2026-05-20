@@ -16,10 +16,7 @@
             height: 100vh;
             margin: 0;
             overflow: hidden;
-            cursor: pointer;
         }
-
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
 
         #jarvis-core-wrapper {
             position: relative; width: 250px; height: 250px; display: flex;
@@ -39,80 +36,45 @@
             border: 2px dashed #00f0ff; animation: spin 10s linear infinite;
         }
 
-        #status { font-size: 1.2rem; letter-spacing: 3px; text-shadow: 0 0 10px #00f0ff; margin-top: 30px; z-index: 10; }
-
-        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 0.8; } }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        /* 자비스 응답 출력창 */
         #response-box {
-            position: absolute;
-            bottom: 120px;
-            width: 80%;
-            max-width: 600px;
-            text-align: center;
-            font-size: 1.1rem;
-            line-height: 1.5;
-            color: #00f0ff;
-            text-shadow: 0 0 10px #00f0ff;
-            background: rgba(0, 240, 255, 0.1);
-            border: 1px solid rgba(0, 240, 255, 0.3);
-            border-radius: 10px;
-            padding: 15px;
-            z-index: 999;
-            display: none;
+            position: absolute; bottom: 120px; width: 80%; max-width: 600px;
+            text-align: center; font-size: 1.2rem; color: #00f0ff;
+            background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 10px; padding: 20px; display: none;
         }
     </style>
 </head>
 <body>
 
-    <div id="canvas-container"></div>
     <div id="jarvis-core-wrapper">
         <div id="jarvis-core"></div>
         <div id="jarvis-core-inner"></div>
     </div>
-    <div id="status">TOUCH TO SYNC SYSTEM</div>
 
     <div id="response-box"></div>
 
-    <div id="text-input-container" style="position: absolute; bottom: 40px; width: 100%; text-align: center; z-index: 999;">
+    <div style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
-               style="padding: 12px; width: 60%; max-width: 400px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; font-size: 16px; outline: none; box-shadow: 0 0 10px #00f0ff;">
-        <button onclick="sendTextCommand()" 
-                style="padding: 12px 24px; margin-left: 10px; background: #00f0ff; color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 0 10px #00f0ff;">
-            전송
-        </button>
+               style="padding: 12px; width: 60%; max-width: 400px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
+        <button onclick="sendTextCommand()" style="padding: 12px 24px; margin-left: 10px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
     </div>
 
     <script>
-        let renderer = false; 
         let chatHistory = [];         
 
-        // [확장 대비 모듈화] 물리 환경에 따라 로직 교체 가능
-        const JarvisModule = {
-            output: (text) => {
-                const box = document.getElementById("response-box");
-                box.style.display = "block";
-                box.innerText = text;
-            },
-            // 현재는 소리 출력 불가능한 환경이므로 비워둠
-            speak: (text) => {
-                console.log("TTS 모듈 비활성 상태: ", text);
-            }
-        };
-
         async function fetchToGemma(userQuestion) {
-            JarvisModule.output("데이터 추론 중...");
+            const responseBox = document.getElementById("response-box");
+            responseBox.style.display = "block";
+            responseBox.innerText = "분석 중...";
             
             try {
-                const systemPrompt = "너는 주인님(주현)을 위한 자비스다. 논리적으로 답변하라.";
+                // 시스템 프롬프트 설정 (페르소나 유지)
+                const systemPrompt = "너는 자비스다. 주인님(주현)에게 예의 바르고 명확하게 답변하라.";
                 let messages = [{ role: "system", content: systemPrompt }];
-
-                chatHistory.forEach(chat => {
-                    messages.push({ role: "user", content: chat.user });
-                    messages.push({ role: "assistant", content: chat.model });
-                });
-
+                chatHistory.forEach(c => messages.push({ role: "user", content: c.user }, { role: "assistant", content: c.model }));
                 messages.push({ role: "user", content: userQuestion });
 
                 const response = await fetch("https://banjl4487-jarvis-habe-project.hf.space/chat/completions", { 
@@ -120,48 +82,35 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         messages: messages,
-                        temperature: 0.4,
-                        max_tokens: 512,
+                        temperature: 0.7,          // 자연스러운 대화를 위해 0.7
+                        max_tokens: 300,           // 충분한 답변 길이
+                        repeat_penalty: 1.15,      // 반복 방지
+                        presence_penalty: 0.1,     // 새로운 내용 유도
+                        frequency_penalty: 0.1,    // 중복 단어 방지
                         stream: false
                     })
                 });
 
-                if (!response.ok) throw new Error(`서버 응답 실패: ${response.status}`);
+                if (!response.ok) throw new Error("서버 응답 오류");
 
                 const result = await response.json();
                 let reply = result.choices[0].message.content.trim();
 
                 chatHistory.push({ user: userQuestion, model: reply });
-                if (chatHistory.length > 5) chatHistory.shift(); 
+                if (chatHistory.length > 3) chatHistory.shift(); 
 
-                JarvisModule.output(reply);
-                JarvisModule.speak(reply);
-
+                responseBox.innerText = reply;
             } catch (error) {
-                console.error("통신 에러:", error);
-                JarvisModule.output("연결 오류가 발생했습니다.");
+                responseBox.innerText = "연결 오류 발생. 서버 확인 필요.";
             }
         }
-
-        document.body.onclick = (event) => {
-            if(event.target.closest('#text-input-container')) return;
-            if (!renderer) {
-                renderer = true;
-                document.getElementById('status').innerText = "SYSTEM ONLINE (TEXT MODE)";
-            }
-        };
 
         function sendTextCommand() {
             const inputField = document.getElementById("tempInput");
-            const text = inputField.value.trim();
-            if (!text) return; 
-            inputField.value = ""; 
-            fetchToGemma(text); 
+            if (!inputField.value.trim()) return; 
+            fetchToGemma(inputField.value);
+            inputField.value = "";
         }
-
-        document.getElementById("tempInput").addEventListener("keypress", (e) => {
-            if (e.key === "Enter") sendTextCommand();
-        });
     </script>
 </body>
 </html>
