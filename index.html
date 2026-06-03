@@ -68,18 +68,20 @@
                 if (!response.ok) throw new Error("서버 통신 오류");
 
                 const result = await response.json();
-                // 백엔드: { "status": "OPEN/SEARCH/TALK", "reply": "...", "targetSite": "..." }
-                
-                responseBox.innerHTML = `<div>${result.reply}</div>`;
+                console.log("받은 데이터:", result); // 여기서 브라우저 F12 콘솔로 구조 확인 가능
 
+                // 수정: 백엔드가 보내주는 키(reply, status, action)에 맞춰 수정
+                responseBox.innerHTML = `<div>${result.reply}</div>`;
+                
                 // 상태 기반 행동 실행기
-                if (result.status === "OPEN" || result.status === "SEARCH") {
+                if (result.status === "OPEN") {
                     setTimeout(() => {
-                        window.open(result.targetSite, "_blank");
+                        window.open(result.action, "_blank");
                     }, 500);
                 }
 
             } catch (error) {
+                console.error(error);
                 responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그를 확인해!";
             }
         }
