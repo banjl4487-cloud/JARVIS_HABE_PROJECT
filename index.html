@@ -68,20 +68,24 @@
                 if (!response.ok) throw new Error("서버 통신 오류");
 
                 const result = await response.json();
-                console.log("받은 데이터:", result); // 여기서 브라우저 F12 콘솔로 구조 확인 가능
-
-                // 수정: 백엔드가 보내주는 키(reply, status, action)에 맞춰 수정
-                responseBox.innerHTML = `<div>${result.reply}</div>`;
                 
-                // 상태 기반 행동 실행기
-                if (result.status === "OPEN") {
+                // [포장지 벗기기 로직] LLM이 choices 배열 안에 넣어준 JSON 문자열을 실제 객체로 파싱
+                const jsonString = result.choices[0].text;
+                const data = JSON.parse(jsonString);
+                
+                console.log("최종 파싱된 데이터:", data); 
+
+                // 파싱된 data 객체에서 reply, status, action 사용
+                responseBox.innerHTML = `<div>${data.reply}</div>`;
+                
+                if (data.status === "OPEN") {
                     setTimeout(() => {
-                        window.open(result.action, "_blank");
+                        window.open(data.action, "_blank");
                     }, 500);
                 }
 
             } catch (error) {
-                console.error(error);
+                console.error("오류 발생:", error);
                 responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그를 확인해!";
             }
         }
