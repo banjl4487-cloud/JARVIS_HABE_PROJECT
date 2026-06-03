@@ -37,17 +37,6 @@
             max-height: 200px; overflow-y: auto;
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
         }
-        .btn-group {
-            margin-top: 15px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
-        }
-        .action-btn {
-            background: rgba(0, 240, 255, 0.2); border: 1px solid #00f0ff; color: #00f0ff;
-            padding: 8px 16px; border-radius: 5px; font-family: inherit; font-weight: bold;
-            cursor: pointer; transition: all 0.3s;
-        }
-        .action-btn:hover {
-            background: #00f0ff; color: #050505; box-shadow: 0 0 10px #00f0ff;
-        }
     </style>
 </head>
 <body>
@@ -64,9 +53,6 @@
     </div>
 
     <script>
-        let chatHistory = [];          
-
-        // 백엔드 라우터 연동 및 출력 제어 파이프라인
         async function fetchToGemma(userQuestion) {
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
@@ -76,50 +62,25 @@
                 const response = await fetch("https://banjl4487-jarvis-habe-project.hf.space/chat/completions", { 
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        query: userQuestion,
-                        history: chatHistory
-                    })
+                    body: JSON.stringify({ query: userQuestion })
                 });
 
                 if (!response.ok) throw new Error("서버 통신 오류");
 
                 const result = await response.json();
-                const { status, reply, targetSite, options } = result;
+                // 백엔드: { "status": "OPEN/SEARCH/TALK", "reply": "...", "targetSite": "..." }
+                
+                responseBox.innerHTML = `<div>${result.reply}</div>`;
 
-                // 1. 자비스 응답 텍스트 출력
-                responseBox.innerHTML = `<div>${reply}</div>`;
-
-                // 2. 컨텍스트 히스토리 관리 (최근 3개 세션 유지)
-                chatHistory.push({ user: userQuestion, model: reply });
-                if (chatHistory.length > 3) chatHistory.shift(); 
-
-                // 3. 백엔드 상태 판정 플래그 기반 행동 분기 제어
-                if (status === "OPEN" && targetSite) {
-                    // 사이트 오픈 가로채기 및 구글 I'm Feeling Lucky 라우팅
+                // 상태 기반 행동 실행기
+                if (result.status === "OPEN" || result.status === "SEARCH") {
                     setTimeout(() => {
-                        window.open(`https://www.google.com/search?q=${targetSite}&btnI=I`, "_blank");
-                    }, 600);
-                } 
-                else if (status === "AMBIGUOUS" && options) {
-                    // 판단 미스 위험 구간 진입 시 사용자 인터랙션 버튼 렌더링
-                    const btnGroup = document.createElement("div");
-                    btnGroup.className = "btn-group";
-
-                    options.forEach(opt => {
-                        const btn = document.createElement("button");
-                        btn.className = "action-btn";
-                        btn.innerText = opt;
-                        btn.onclick = () => {
-                            fetchToGemma(`${userQuestion} -> ${opt} 방향으로 실행해줘`);
-                        };
-                        btnGroup.appendChild(btn);
-                    });
-                    responseBox.appendChild(btnGroup);
+                        window.open(result.targetSite, "_blank");
+                    }, 500);
                 }
 
             } catch (error) {
-                responseBox.innerText = "연결 오류 발생. 라우터 서버 및 네트워크 상태를 확인하십시오.";
+                responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그를 확인해!";
             }
         }
 
