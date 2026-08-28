@@ -84,13 +84,17 @@
                 
                 console.log("최종 파싱 데이터:", data); 
 
-                // 화면 출력
-                responseBox.innerHTML = `<div>${data.reply}</div>`;
+                // ★ 수정됨: 파이썬이 보내주는 'message'를 화면에 출력
+                if (data.message) {
+                    responseBox.innerHTML = `<div>${data.message}</div>`;
+                } else {
+                    responseBox.innerHTML = `<div>데이터를 읽을 수 없습니다.</div>`;
+                }
                 
-                // 상태 기반 행동 실행
-                if (data.status === "OPEN") {
+                // ★ 수정됨: 파이썬이 보내주는 'url'이 존재하면 새 창 열기
+                if (data.url && data.url.trim() !== "") {
                     setTimeout(() => {
-                        window.open(data.action, "_blank");
+                        window.open(data.url, "_blank");
                     }, 500);
                 }
 
