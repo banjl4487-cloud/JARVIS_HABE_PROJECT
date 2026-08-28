@@ -1,108 +1,221 @@
 <!DOCTYPE html>
+
 <html lang="ko">
+
 <head>
+
     <meta charset="UTF-8">
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>JARVIS System - R&D MLOps Pipeline</title>
+
     <style>
+
         body {
+
             background-color: #050505; color: #00f0ff;
+
             font-family: 'Courier New', Courier, monospace;
+
             display: flex; flex-direction: column; align-items: center;
+
             justify-content: center; height: 100vh; margin: 0; overflow: hidden;
+
         }
+
         #jarvis-core-wrapper {
+
             position: relative; width: 250px; height: 250px; display: flex;
+
             justify-content: center; align-items: center; z-index: 10;
+
             filter: drop-shadow(0 0 20px #00f0ff);
+
         }
+
         #jarvis-core {
+
             width: 100%; height: 100%; border-radius: 50%; border: 4px solid #00f0ff;
+
             box-shadow: 0 0 15px #00f0ff, inset 0 0 15px #00f0ff; position: absolute;
+
             animation: pulse 2s infinite;
+
         }
+
         #jarvis-core-inner {
+
             width: 80%; height: 80%; border-radius: 50%;
+
             background: radial-gradient(circle, rgba(0,240,255,0.8) 0%, rgba(0,240,255,0) 70%);
+
             border: 2px dashed #00f0ff; animation: spin 10s linear infinite;
+
         }
+
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
         
+
         #response-box {
+
             position: absolute; bottom: 140px; width: 80%; max-width: 600px;
+
             text-align: center; font-size: 1.1rem; color: #00f0ff;
+
             background: rgba(0, 240, 255, 0.05); border: 1px solid rgba(0, 240, 255, 0.3);
+
             border-radius: 10px; padding: 20px; display: none;
+
             max-height: 200px; overflow-y: auto;
+
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
+
         }
+
     </style>
+
 </head>
+
 <body>
+
     <div id="jarvis-core-wrapper">
+
         <div id="jarvis-core"></div>
+
         <div id="jarvis-core-inner"></div>
+
     </div>
+
     <div id="response-box"></div>
 
+
+
     <div style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
+
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
+
                style="padding: 12px; width: 60%; max-width: 400px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
+
         <button onclick="sendTextCommand()" style="padding: 12px 24px; margin-left: 10px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
+
     </div>
 
+
+
     <script>
+
         async function fetchToGemma(userQuestion) {
+
             const responseBox = document.getElementById("response-box");
+
             responseBox.style.display = "block";
+
             responseBox.innerHTML = "<div>사고 로직 가동 중...</div>";
+
             
+
             try {
+
                 const response = await fetch("https://banjl4487-jarvis-habe-project.hf.space/chat/completions", { 
+
                     method: "POST",
+
                     headers: { "Content-Type": "application/json" },
+
                     body: JSON.stringify({ query: userQuestion })
+
                 });
+
+
 
                 if (!response.ok) throw new Error("서버 통신 오류");
 
+
+
                 const result = await response.json();
+
                 
-                // [원래 작동하던 파싱 로직 복구]
+
+                // [최종 진화형: 포장지 벗기기 및 정제 로직]
+
                 let rawText = result.choices[0].text;
+
+                
+
+                // 1. 마크다운 태그 및 잡다한 문자열 제거
+
                 rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+
                 
+
+                // 2. { 로 시작해서 } 로 끝나는 JSON 객체 부분만 강력 추출
+
                 const jsonMatch = rawText.match(/\{.*\}/s);
+
                 if (!jsonMatch) throw new Error("응답에서 데이터를 찾을 수 없습니다.");
+
                 
+
+                // 3. new Function을 사용하여 따옴표 누락 등 미세한 JSON 오류까지 강제 파싱
+
                 const data = new Function(`return ${jsonMatch[0]}`)();
+
+                
+
                 console.log("최종 파싱 데이터:", data); 
 
-                // 1. 백과사전 요약 텍스트 출력 (message 또는 reply 지원 + 줄바꿈 반영)
-                const replyText = data.message || data.reply || "결과를 가져왔습니다.";
-                responseBox.innerHTML = `<div>${replyText.replace(/\n/g, "<br>")}</div>`;
+
+
+                // 화면 출력
+
+                responseBox.innerHTML = `<div>${data.reply}</div>`;
+
                 
-                // 2. 원래 잘 되던 사이트 열기 및 검색창 띄우기 동작
-                const targetUrl = data.url || (data.status === "OPEN" ? data.action : "");
-                if (targetUrl && targetUrl.trim() !== "") {
+
+                // 상태 기반 행동 실행
+
+                if (data.status === "OPEN") {
+
                     setTimeout(() => {
-                        window.open(targetUrl, "_blank");
+
+                        window.open(data.action, "_blank");
+
                     }, 500);
+
                 }
 
+
+
             } catch (error) {
+
                 console.error("오류 발생:", error);
+
                 responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그나 콘솔 확인해!";
+
             }
+
         }
 
+
+
         function sendTextCommand() {
+
             const inputField = document.getElementById("tempInput");
+
             if (!inputField.value.trim()) return; 
+
             fetchToGemma(inputField.value);
+
             inputField.value = "";
+
         }
+
     </script>
+
 </body>
+
 </html>
