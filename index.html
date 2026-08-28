@@ -67,28 +67,33 @@
 
                 if (!response.ok) throw new Error("서버 통신 오류");
 
-                // 백엔드에서 보내주는 JSON 데이터를 그대로 받음
-                const data = await response.json();
+                const result = await response.json();
                 
+                // [원래 작동하던 파싱 로직 복구]
+                let rawText = result.choices[0].text;
+                rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+                
+                const jsonMatch = rawText.match(/\{.*\}/s);
+                if (!jsonMatch) throw new Error("응답에서 데이터를 찾을 수 없습니다.");
+                
+                const data = new Function(`return ${jsonMatch[0]}`)();
                 console.log("최종 파싱 데이터:", data); 
 
-                // 1. 백엔드의 'message'를 화면에 출력 (줄바꿈 처리 포함)
-                if (data && data.message) {
-                    responseBox.innerHTML = `<div>${data.message.replace(/\n/g, "<br>")}</div>`;
-                } else {
-                    responseBox.innerHTML = `<div>데이터를 읽을 수 없습니다.</div>`;
-                }
+                // 1. 백과사전 요약 텍스트 출력 (message 또는 reply 지원 + 줄바꿈 반영)
+                const replyText = data.message || data.reply || "결과를 가져왔습니다.";
+                responseBox.innerHTML = `<div>${replyText.replace(/\n/g, "<br>")}</div>`;
                 
-                // 2. 백엔드의 'url'이 존재하면 새 창 열기
-                if (data && data.url && data.url.trim() !== "") {
+                // 2. 원래 잘 되던 사이트 열기 및 검색창 띄우기 동작
+                const targetUrl = data.url || (data.status === "OPEN" ? data.action : "");
+                if (targetUrl && targetUrl.trim() !== "") {
                     setTimeout(() => {
-                        window.open(data.url, "_blank");
+                        window.open(targetUrl, "_blank");
                     }, 500);
                 }
 
             } catch (error) {
                 console.error("오류 발생:", error);
-                responseBox.innerText = "연결 오류 발생. 백엔드 서버 로그나 콘솔을 확인해 주세요.";
+                responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그나 콘솔 확인해!";
             }
         }
 
