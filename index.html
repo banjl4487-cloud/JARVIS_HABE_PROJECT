@@ -67,32 +67,20 @@
 
                 if (!response.ok) throw new Error("서버 통신 오류");
 
-                const result = await response.json();
-                
-                // [최종 진화형: 포장지 벗기기 및 정제 로직]
-                let rawText = result.choices[0].text;
-                
-                // 1. 마크다운 태그 및 잡다한 문자열 제거
-                rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-                
-                // 2. { 로 시작해서 } 로 끝나는 JSON 객체 부분만 강력 추출
-                const jsonMatch = rawText.match(/\{.*\}/s);
-                if (!jsonMatch) throw new Error("응답에서 데이터를 찾을 수 없습니다.");
-                
-                // 3. new Function을 사용하여 따옴표 누락 등 미세한 JSON 오류까지 강제 파싱
-                const data = new Function(`return ${jsonMatch[0]}`)();
+                // 백엔드에서 보내주는 JSON 데이터를 그대로 받음
+                const data = await response.json();
                 
                 console.log("최종 파싱 데이터:", data); 
 
-                // ★ 수정됨: 파이썬이 보내주는 'message'를 화면에 출력
-                if (data.message) {
-                    responseBox.innerHTML = `<div>${data.message}</div>`;
+                // 1. 백엔드의 'message'를 화면에 출력 (줄바꿈 처리 포함)
+                if (data && data.message) {
+                    responseBox.innerHTML = `<div>${data.message.replace(/\n/g, "<br>")}</div>`;
                 } else {
                     responseBox.innerHTML = `<div>데이터를 읽을 수 없습니다.</div>`;
                 }
                 
-                // ★ 수정됨: 파이썬이 보내주는 'url'이 존재하면 새 창 열기
-                if (data.url && data.url.trim() !== "") {
+                // 2. 백엔드의 'url'이 존재하면 새 창 열기
+                if (data && data.url && data.url.trim() !== "") {
                     setTimeout(() => {
                         window.open(data.url, "_blank");
                     }, 500);
@@ -100,7 +88,7 @@
 
             } catch (error) {
                 console.error("오류 발생:", error);
-                responseBox.innerText = "연결 오류 발생. 주현아, 백엔드 서버 로그나 콘솔 확인해!";
+                responseBox.innerText = "연결 오류 발생. 백엔드 서버 로그나 콘솔을 확인해 주세요.";
             }
         }
 
