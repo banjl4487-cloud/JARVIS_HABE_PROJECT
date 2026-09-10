@@ -67,22 +67,20 @@
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
                style="padding: 12px; width: 50%; max-width: 350px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
         <button id="sendBtn" onclick="sendTextCommand()" style="padding: 12px 20px; margin-left: 8px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
-        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 15px 30px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1.1rem;">👏 박수를 치거나 클릭하세요</button>
+        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 15px 30px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1.1rem;">🎙️ '자비스'라고 불러주세요 (상시 대기)</button>
     </div>
 
     <script>
         let currentMode = 'text';
         let recognition = null;
         let isListening = false;
-        let finalTranscript = '';
         
-        // 🎙️ 목소리 정제 2중 오디오 필터 변수
+        // 🎙️ 오디오 정제 및 웨이크 워드 변수
         let audioContext = null;
         let mediaStreamSource = null;
-        let highPassFilter = null; // 1차 방어선: 선풍기 등 저주파 잡음 커팅
-        let voiceBoostFilter = null; // 2차 방어선: 사람 목소리 명료도(중고역대) 집중 부스팅 및 잡음 억제
-        let analyser = null;
-        let isDualPipelineActive = false;
+        let highPassFilter = null;   // 1차: 저주파(선풍기 등) 소음 차단
+        let voiceBoostFilter = null; // 2차: 목소리 대역 명료도 강화
+        let isWakeUpActive = false;
 
         function switchMode(mode) {
             currentMode = mode;
@@ -96,7 +94,7 @@
             if (recognition && isListening) {
                 recognition.stop();
             }
-            stopVoicePipeline();
+            stopVoiceSystem();
 
             if (mode === 'text') {
                 textBtn.classList.add('active');
@@ -111,13 +109,16 @@
                 sendBtn.style.display = 'none';
                 micBtn.style.display = 'inline-block';
                 
-                // 음성 모드 진입 시 2중 목소리 정제 파이프라인 가동
-                startVoicePipeline();
+                // 음성 모드 진입: 2중 오디오 필터 가동 후 웨이크 워드('자비스') 상시 대기 시작
+                startVoiceSystem();
+                setTimeout(() => {
+                    startWakeUpListening();
+                }, 500);
             }
         }
 
-        // 🛡️ [2중 목소리 정제 파이프라인] 구현
-        async function startVoicePipeline() {
+        // 🛡️ [2중 오디오 정제 파이프라인] 초기화
+        async function startVoiceSystem() {
             try {
                 if (!audioContext) {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -129,78 +130,33 @@
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaStreamSource = audioContext.createMediaStreamSource(stream);
 
-                // [1차 방어선] High-pass Filter: 300Hz 이하의 웅웅거리는 선풍기/팬 소음 원천 차단
+                // 1차 방어선: 선풍기 웅웅거림 등 저주파 차단
                 highPassFilter = audioContext.createBiquadFilter();
                 highPassFilter.type = "highpass";
                 highPassFilter.frequency.setValueAtTime(300, audioContext.currentTime);
 
-                // [2차 방어선] Peaking Filter (Voice Boost): 사람 목소리가 선명하게 들리는 대역(약 1500Hz)을 강조하여 STT 인식률 극대화
+                // 2차 방어선: 사람 목소리 명료도 집중 부스팅 (STT 인식률 향상)
                 voiceBoostFilter = audioContext.createBiquadFilter();
                 voiceBoostFilter.type = "peaking";
                 voiceBoostFilter.frequency.setValueAtTime(1500, audioContext.currentTime);
                 voiceBoostFilter.Q.setValueAtTime(1.0, audioContext.currentTime);
-                voiceBoostFilter.gain.setValueAtTime(5.0, audioContext.currentTime); // 목소리 대역 5dB 부스팅
+                voiceBoostFilter.gain.setValueAtTime(5.0, audioContext.currentTime);
 
-                // 박수 및 볼륨 감지용 분석기
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
-
-                // [직렬 연결 구조]: 마이크 ➡️ 1차 필터(잡음제거) ➡️ 2차 필터(목소리강화) ➡️ 분석기
                 mediaStreamSource.connect(highPassFilter);
                 highPassFilter.connect(voiceBoostFilter);
-                voiceBoostFilter.connect(analyser);
+                // (분석기는 웨이크 워드 텍스트 매칭 방식으로 대체하여 생략)
 
-                isDualPipelineActive = true;
-                monitorVoiceInput(); // 박수 및 볼륨 트리거 모니터링 시작
+                isWakeUpActive = true;
             } catch (e) {
-                console.error("2중 목소리 파이프라인 초기화 실패:", e);
+                console.error("오디오 시스템 초기화 실패:", e);
             }
         }
 
-        function stopVoicePipeline() {
-            isDualPipelineActive = false;
+        function stopVoiceSystem() {
+            isWakeUpActive = false;
             if (audioContext && audioContext.state !== 'closed') {
                 audioContext.suspend();
             }
-        }
-
-        // 박수 소리 및 유효 입력 감지 루프
-        function monitorVoiceInput() {
-            if (!isDualPipelineActive || !analyser) return;
-
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-            }
-            let average = sum / dataArray.length;
-
-            // 박수 소리 등 순간적 충격음 감지 시 준비 상태로 진입
-            if (average > 45 && !isListening && currentMode === 'voice') {
-                triggerJarvisReady();
-            }
-
-            if (isDualPipelineActive) {
-                requestAnimationFrame(monitorVoiceInput);
-            }
-        }
-
-        function triggerJarvisReady() {
-            const micBtn = document.getElementById("micBtn");
-            const coreWrapper = document.getElementById("jarvis-core-wrapper");
-            
-            coreWrapper.style.filter = "drop-shadow(0 0 35px #ff0055)";
-            micBtn.style.background = "#ff0055";
-            micBtn.style.color = "#fff";
-            micBtn.innerText = "🔴 음성 정제 중! 말씀하세요...";
-
-            setTimeout(() => {
-                coreWrapper.style.filter = "drop-shadow(0 0 20px #00f0ff)";
-            }, 500);
-
-            startVoiceRecognitionProcess();
         }
 
         function speakText(text) {
@@ -211,16 +167,20 @@
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
             
+            // 자비스가 대화를 마치면 자동으로 다시 '자비스' 호출 대기 상태로 복귀
             utterance.onend = () => {
                 if (currentMode === 'voice' && !isListening) {
-                    resetMicButton();
+                    setTimeout(() => {
+                        startWakeUpListening();
+                    }, 500);
                 }
             };
 
             window.speechSynthesis.speak(utterance);
         }
 
-        function initSpeechRecognition() {
+        // 🧠 "자비스" 웨이크 워드 및 음성 인식을 담당하는 핵심 함수
+        function initWakeUpRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
                 alert("이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 사용해주세요.");
@@ -234,23 +194,25 @@
 
             rec.onstart = () => {
                 isListening = true;
-                finalTranscript = '';
                 const micBtn = document.getElementById("micBtn");
-                micBtn.style.background = "#ff0055";
-                micBtn.style.color = "#fff";
-                micBtn.innerText = "🔴 듣고 있습니다... (다 말씀하시면 다시 클릭)";
+                micBtn.style.background = "transparent";
+                micBtn.style.color = "#00f0ff";
+                micBtn.innerText = "👂 '자비스' 대기 중... 말씀하세요";
             };
 
             rec.onresult = (event) => {
-                let interim = '';
+                let transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
-                    } else {
-                        interim += event.results[i][0].transcript;
-                    }
+                    transcript += event.results[i][0].transcript;
                 }
-                document.getElementById("tempInput").value = finalTranscript + interim;
+                
+                document.getElementById("tempInput").value = transcript;
+                
+                // [웨이크 워드 감지 로직]: 입력된 텍스트에 "자비스"가 포함되어 있는지 실시간 확인
+                if (transcript.includes("자비스") && !window.jarvisTriggered) {
+                    window.jarvisTriggered = true;
+                    triggerJarvisAwake(transcript);
+                }
             };
 
             rec.onerror = (event) => {
@@ -261,32 +223,55 @@
 
             rec.onend = () => {
                 isListening = false;
-                resetMicButton();
+                window.jarvisTriggered = false;
+                
+                // 만약 웨이크 워드로 깨어난 후 명령까지 마쳤다면 서버로 전송
                 const completeText = document.getElementById("tempInput").value.trim();
-                if (completeText) {
+                if (completeText && currentMode === 'voice') {
                     document.getElementById("tempInput").value = "";
                     fetchToGemma(completeText);
+                } else if (currentMode === 'voice' && isWakeUpActive) {
+                    // 별 말 없이 끊겼다면 다시 '자비스' 대기 상태로 재진입
+                    setTimeout(() => {
+                        startWakeUpListening();
+                    }, 400);
                 }
             };
 
             return rec;
         }
 
+        function triggerJarvisAwake(spokenText) {
+            const micBtn = document.getElementById("micBtn");
+            const coreWrapper = document.getElementById("jarvis-core-wrapper");
+            
+            // 시각적 피드백 (자비스 코어 번쩍임)
+            coreWrapper.style.filter = "drop-shadow(0 0 35px #ff0055)";
+            micBtn.style.background = "#ff0055";
+            micBtn.style.color = "#fff";
+            micBtn.innerText = "🔴 자비스 기동! 명령을 듣고 있습니다...";
+
+            setTimeout(() => {
+                coreWrapper.style.filter = "drop-shadow(0 0 20px #00f0ff)";
+            }, 600);
+        }
+
         function resetMicButton() {
             const micBtn = document.getElementById("micBtn");
             micBtn.style.background = "transparent";
             micBtn.style.color = "#00f0ff";
-            micBtn.innerText = "👏 박수를 치거나 클릭하세요";
+            micBtn.innerText = "🎙️ '자비스'라고 불러주세요 (상시 대기)";
         }
 
-        function startVoiceRecognitionProcess() {
+        function startWakeUpListening() {
+            if (currentMode !== 'voice' || !isWakeUpActive) return;
             if (!recognition) {
-                recognition = initSpeechRecognition();
+                recognition = initWakeUpRecognition();
                 if (!recognition) return;
             }
-            if (!isListening && currentMode === 'voice') {
+            if (!isListening) {
                 try {
-                    if (window.speechSynthesis) window.speechSynthesis.cancel();
+                    window.jarvisTriggered = false;
                     recognition.start();
                 } catch (e) {
                     console.error(e);
@@ -294,16 +279,12 @@
             }
         }
 
+        // 수동 클릭으로도 언제든 켜고 끌 수 있는 이중 트리거 지원
         function toggleVoiceInput() {
-            if (!recognition) {
-                recognition = initSpeechRecognition();
-                if (!recognition) return;
-            }
-
             if (isListening) {
-                recognition.stop(); 
+                if (recognition) recognition.stop();
             } else {
-                triggerJarvisReady();
+                startWakeUpListening();
             }
         }
 
@@ -336,7 +317,7 @@
                 
                 responseBox.innerHTML = `<div>${data.reply}</div>`;
                 if (data.reply) {
-                    speakText(data.reply);
+                    speakText(data.reply); // 답변이 끝나면 다시 '자비스' 대기 모드로 자동 전환됨
                 }
                 
                 if (data.status === "OPEN") {
