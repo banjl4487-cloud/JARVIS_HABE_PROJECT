@@ -42,6 +42,9 @@
         .mode-btn.active {
             color: #00f0ff; text-shadow: 0 0 8px #00f0ff;
         }
+        .beta-badge {
+            font-size: 0.75rem; color: #ff0055; border: 1px solid #ff0055; padding: 1px 4px; border-radius: 4px; margin-left: 4px; vertical-align: middle;
+        }
 
         .control-panel {
             position: absolute; bottom: 40px; width: 100%; text-align: center; display: flex; justify-content: center; gap: 10px; align-items: center;
@@ -68,7 +71,7 @@
 <body>
     <div class="mode-container">
         <button id="textModeBtn" class="mode-btn active" onclick="switchMode('text')">💬 텍스트 모드</button>
-        <button id="voiceModeBtn" class="mode-btn" onclick="switchMode('voice')">🎤 음성 대화 모드</button>
+        <button id="voiceModeBtn" class="mode-btn" onclick="switchMode('voice')">🎤 음성인식 모드 <span class="beta-badge">BETA</span></button>
     </div>
 
     <div id="jarvis-container">
@@ -95,7 +98,7 @@
         let voiceBoostFilter = null;
         let isWakeUpActive = false;
         let isManualActive = false;
-        let silenceTimer = null; // ⏱️ 2~3초 침묵 감지용 타이머
+        let silenceTimer = null;
 
         const canvas = document.getElementById("jarvisCanvas");
         const ctx = canvas.getContext("2d");
@@ -263,7 +266,6 @@
             window.speechSynthesis.speak(utterance);
         }
 
-        // 🤖 자동 모드 ("자비스" 감지 후 2~3초 침묵 시 자동 종료 및 전송)
         function startAutoWakeUp() {
             if (currentMode !== 'voice' || !isWakeUpActive || isManualActive || isListening) return;
 
@@ -287,16 +289,14 @@
                     transcript += event.results[i][0].transcript;
                 }
                 
-                // 1단계: "자비스" 웨이크 워드 감지
                 if (transcript.includes("자비스")) {
-                    setCoreState('ACTIVE'); // 🔴 빨간색 전환
+                    setCoreState('ACTIVE'); 
                     
-                    // ⏱️ 2.5초 동안 추가 음성 입력이 없으면 말을 마친 것으로 판단
                     if (silenceTimer) clearTimeout(silenceTimer);
                     silenceTimer = setTimeout(() => {
                         recognition.stop();
                         fetchToGemma(transcript);
-                    }, 2500); // 2.5초 침묵 대기
+                    }, 2500); 
                 }
             };
 
@@ -319,7 +319,6 @@
             }
         }
 
-        // 🖱️ 수동 모드 (버튼 클릭으로 시작, 재클릭 전까지 락 유지)
         function toggleManualVoice() {
             if (isManualActive) {
                 isManualActive = false;
