@@ -47,7 +47,6 @@
             position: absolute; bottom: 40px; width: 100%; text-align: center; display: flex; justify-content: center; gap: 10px; align-items: center;
         }
 
-        /* 🎛️ 심플하고 시크한 터미널 스타일 버튼 */
         .cyber-btn {
             background: rgba(0, 240, 255, 0.1);
             color: #00f0ff;
@@ -255,6 +254,7 @@
             utterance.onstart = () => setCoreState('TRIGGERED');
             utterance.onend = () => {
                 setCoreState('IDLE');
+                // 🛑 수동 모드일 때는 대답이 끝나도 절대 자동 대기로 돌아가지 않고 락을 유지함
                 if (currentMode === 'voice' && isWakeUpActive && !isManualMode && !isListening) {
                     setTimeout(() => startAutoWakeUp(), 500);
                 }
@@ -280,6 +280,7 @@
             };
 
             recognition.onresult = (event) => {
+                if (isManualMode) return; // 수동 모드면 무시
                 let transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     transcript += event.results[i][0].transcript;
@@ -313,7 +314,9 @@
             }
         }
 
+        // 🖱️ 수동 전환 및 락 제어 함수 (재클릭 전까지 추가 인식 금지)
         function toggleAutoToManual() {
+            // 이미 수동 모드인 상태에서 버튼을 다시 누르면 수동 해제 및 자동 대기로 복귀
             if (isManualMode) {
                 isManualMode = false;
                 if (recognition) {
@@ -325,9 +328,8 @@
                 return;
             }
 
+            // 자동 모드 중단 후 수동 모드 락 진입
             isManualMode = true;
-            isWakeUpActive = false;
-            
             if (recognition) {
                 try { recognition.stop(); } catch(e){}
             }
@@ -341,15 +343,16 @@
             recognition = new SpeechRecognition();
             recognition.lang = 'ko-KR';
             recognition.interimResults = false;
-            recognition.continuous = false;
+            recognition.continuous = false; // 단건 입력 후 자동 종료
 
             recognition.onstart = () => {
                 isListening = true;
                 setCoreState('TRIGGERED');
-                document.getElementById("micBtn").innerText = "LISTENING...";
+                document.getElementById("micBtn").innerText = "LISTENING (LOCK)";
             };
 
             recognition.onresult = (event) => {
+                if (!isManualMode) return;
                 let transcript = event.results[0][0].transcript;
                 setCoreState('TRIGGERED');
                 fetchToGemma(transcript);
@@ -358,12 +361,16 @@
             recognition.onerror = () => {
                 isListening = false;
                 setCoreState('IDLE');
-                document.getElementById("micBtn").innerText = "MIC MANUAL";
+                document.getElementById("micBtn").innerText = "MIC MANUAL (LOCKED)";
             };
 
             recognition.onend = () => {
                 isListening = false;
-                document.getElementById("micBtn").innerText = "MIC MANUAL";
+                // 🔒 수동 모드에서는 인식이 끝나도 자동 재시작을 하지 않고 락 상태를 유지함
+                if (isManualMode) {
+                    setCoreState('IDLE');
+                    document.getElementById("micBtn").innerText = "MIC MANUAL (LOCKED)";
+                }
             };
 
             try {
