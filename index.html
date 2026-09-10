@@ -38,7 +38,6 @@
             box-shadow: 0 0 15px rgba(0, 240, 255, 0.1);
         }
 
-        /* 모드 선택 스타일 */
         .mode-container {
             position: absolute; top: 30px; display: flex; gap: 10px; background: rgba(0,240,255,0.1);
             padding: 5px 15px; border-radius: 20px; border: 1px solid rgba(0,240,255,0.3);
@@ -52,7 +51,6 @@
     </style>
 </head>
 <body>
-    <!-- 상단 모드 선택 스위치 -->
     <div class="mode-container">
         <button id="textModeBtn" class="mode-btn active" onclick="switchMode('text')">💬 텍스트 모드</button>
         <button id="voiceModeBtn" class="mode-btn" onclick="switchMode('voice')">🎤 음성 대화 모드</button>
@@ -64,40 +62,53 @@
     </div>
     <div id="response-box"></div>
 
-    <div style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
+    <div id="input-container" style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
                style="padding: 12px; width: 50%; max-width: 350px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
-        <button onclick="sendTextCommand()" style="padding: 12px 20px; margin-left: 8px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
-        <!-- 음성 모드일 때만 활성화되는 마이크 버튼 -->
+        <button id="sendBtn" onclick="sendTextCommand()" style="padding: 12px 20px; margin-left: 8px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
         <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 12px 20px; margin-left: 8px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer;">🎤 말하기</button>
     </div>
 
     <script>
-        let currentMode = 'text'; // 기본값은 텍스트 모드
+        let currentMode = 'text';
+        let recognition = null;
+        let isListening = false;
 
-        // 모드 전환 함수
         function switchMode(mode) {
             currentMode = mode;
             const textBtn = document.getElementById("textModeBtn");
             const voiceBtn = document.getElementById("voiceModeBtn");
             const micBtn = document.getElementById("micBtn");
             const inputField = document.getElementById("tempInput");
+            const sendBtn = document.getElementById("sendBtn");
+
+            if (window.speechSynthesis) window.speechSynthesis.cancel();
+            if (recognition && isListening) {
+                recognition.stop();
+            }
 
             if (mode === 'text') {
                 textBtn.classList.add('active');
                 voiceBtn.classList.remove('active');
+                
+                // 텍스트 모드일 때: 입력창과 전송 버튼 보이기, 말하기 버튼 숨기기
+                inputField.style.display = 'inline-block';
+                sendBtn.style.display = 'inline-block';
                 micBtn.style.display = 'none';
                 inputField.placeholder = "시스템 명령어 입력...";
             } else {
                 voiceBtn.classList.add('active');
                 textBtn.classList.remove('active');
+                
+                // 음성 모드일 때: 입력창과 전송 버튼 숨기고, 말하기 버튼만 크게 노출
+                inputField.style.display = 'none';
+                sendBtn.style.display = 'none';
                 micBtn.style.display = 'inline-block';
-                inputField.placeholder = "음성 버튼을 누르고 말씀하세요...";
-                if (isListening) stopVoiceInput();
+                micBtn.style.padding = '15px 30px'; // 음성 모드일 때 버튼을 좀 더 큼직하게 강조
+                micBtn.style.fontSize = '1.1rem';
             }
         }
 
-        // 1. 자비스 음성 출력 (TTS) 함수
         function speakText(text) {
             if (!window.speechSynthesis) return;
             window.speechSynthesis.cancel();
@@ -106,66 +117,96 @@
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
             
-            // 음성 대화 모드일 때 자비스가 답변을 마치면 자동으로 마이크를 켜줄 수도 있습니다 (선택사항)
             utterance.onend = () => {
-                if (currentMode === 'voice') {
-                    // 필요시 답변 완료 후 자동 음성 인식 대기로 연결 가능
+                if (currentMode === 'voice' && !isListening) {
+                    setTimeout(() => {
+                        startVoiceInput();
+                    }, 300);
                 }
             };
 
             window.speechSynthesis.speak(utterance);
         }
 
-        // 2. 자비스 음성 입력 (STT) 함수
-        let recognition = null;
-        let isListening = false;
-
-        function toggleVoiceInput() {
+        function initSpeechRecognition() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
                 alert("이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 사용해주세요.");
-                return;
+                return null;
             }
 
+            const rec = new SpeechRecognition();
+            rec.lang = 'ko-KR';
+            rec.interimResults = false;
+            rec.maxAlternatives = 1;
+
+            rec.onstart = () => {
+                isListening = true;
+                const micBtn = document.getElementById("micBtn");
+                micBtn.style.background = "#ff0055";
+                micBtn.style.color = "#fff";
+                micBtn.innerText = "🔴 듣고 있는 중...";
+            };
+
+            rec.onresult = (event) => {
+                const speechResult = event.results[0][0].transcript;
+                document.getElementById("tempInput").value = speechResult;
+                fetchToGemma(speechResult); // 인식된 텍스트로 바로 전송
+            };
+
+            rec.onerror = (event) => {
+                console.error("음성 인식 오류:", event.error);
+                isListening = false;
+                resetMicButton();
+            };
+
+            rec.onend = () => {
+                isListening = false;
+                resetMicButton();
+            };
+
+            return rec;
+        }
+
+        function resetMicButton() {
+            const micBtn = document.getElementById("micBtn");
+            micBtn.style.background = "transparent";
+            micBtn.style.color = "#00f0ff";
+            micBtn.innerText = "🎤 말하기";
+        }
+
+        function toggleVoiceInput() {
             if (!recognition) {
-                recognition = new SpeechRecognition();
-                recognition.lang = 'ko-KR';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
-
-                recognition.onstart = () => {
-                    isListening = true;
-                    document.getElementById("micBtn").style.background = "#ff0055";
-                    document.getElementById("micBtn").style.color = "#fff";
-                    document.getElementById("micBtn").innerText = "🔴 듣고 있는 중...";
-                };
-
-                recognition.onresult = (event) => {
-                    const speechResult = event.results[0][0].transcript;
-                    document.getElementById("tempInput").value = speechResult;
-                    sendTextCommand(); // 말하자마자 자동 전송
-                };
-
-                recognition.onerror = (event) => {
-                    console.error("음성 인식 오류:", event.error);
-                };
-
-                recognition.onend = () => {
-                    isListening = false;
-                    document.getElementById("micBtn").style.background = "transparent";
-                    document.getElementById("micBtn").style.color = "#00f0ff";
-                    document.getElementById("micBtn").innerText = "🎤 말하기";
-                };
+                recognition = initSpeechRecognition();
+                if (!recognition) return;
             }
 
             if (isListening) {
                 recognition.stop();
             } else {
-                recognition.start();
+                startVoiceInput();
+            }
+        }
+
+        function startVoiceInput() {
+            if (!recognition) {
+                recognition = initSpeechRecognition();
+                if (!recognition) return;
+            }
+            if (!isListening && currentMode === 'voice') {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error(e);
+                }
             }
         }
 
         async function fetchToGemma(userQuestion) {
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
             responseBox.innerHTML = "<div>사고 로직 가동 중...</div>";
@@ -190,16 +231,12 @@
                 const data = new Function(`return ${jsonMatch[0]}`)();
                 console.log("최종 파싱 데이터:", data); 
 
-                // 화면 출력
                 responseBox.innerHTML = `<div>${data.reply}</div>`;
                 
-                // 음성 출력은 '음성 대화 모드'일 때만 작동하게 하려면 아래 조건을 걸거나, 항상 읽어주게 할 수 있습니다.
-                // 여기서는 음성 모드이거나 사용자가 원할 때 유연하게 작동하도록 설정합니다.
                 if (data.reply) {
                     speakText(data.reply);
                 }
                 
-                // 상태 기반 행동 실행
                 if (data.status === "OPEN") {
                     setTimeout(() => {
                         window.open(data.action, "_blank");
