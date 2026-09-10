@@ -62,17 +62,23 @@
     </div>
     <div id="response-box"></div>
 
-    <div id="input-container" style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
+    <div style="position: absolute; bottom: 40px; width: 100%; text-align: center;">
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
                style="padding: 12px; width: 50%; max-width: 350px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
         <button id="sendBtn" onclick="sendTextCommand()" style="padding: 12px 20px; margin-left: 8px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
-        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 12px 20px; margin-left: 8px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer;">🎤 말하기</button>
+        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 15px 30px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1.1rem;">🎤 말씀하시려면 클릭하세요</button>
     </div>
 
     <script>
         let currentMode = 'text';
         let recognition = null;
         let isListening = false;
+        let finalTranscript = '';
+        
+        // 잡음 제거(노이즈 필터링)를 위한 변수
+        let audioContext = null;
+        let mediaStreamSource = null;
+        let biquadFilter = null;
 
         function switchMode(mode) {
             currentMode = mode;
@@ -86,26 +92,48 @@
             if (recognition && isListening) {
                 recognition.stop();
             }
+            stopNoiseFilter();
 
             if (mode === 'text') {
                 textBtn.classList.add('active');
                 voiceBtn.classList.remove('active');
-                
-                // 텍스트 모드일 때: 입력창과 전송 버튼 보이기, 말하기 버튼 숨기기
                 inputField.style.display = 'inline-block';
                 sendBtn.style.display = 'inline-block';
                 micBtn.style.display = 'none';
-                inputField.placeholder = "시스템 명령어 입력...";
             } else {
                 voiceBtn.classList.add('active');
                 textBtn.classList.remove('active');
-                
-                // 음성 모드일 때: 입력창과 전송 버튼 숨기고, 말하기 버튼만 크게 노출
                 inputField.style.display = 'none';
                 sendBtn.style.display = 'none';
                 micBtn.style.display = 'inline-block';
-                micBtn.style.padding = '15px 30px'; // 음성 모드일 때 버튼을 좀 더 큼직하게 강조
-                micBtn.style.fontSize = '1.1rem';
+                startNoiseFilter(); // 음성 모드 진입 시 마이크 노이즈 필터 대기
+            }
+        }
+
+        // Web Audio API를 이용해 선풍기 바람 같은 저주파 소음(웅웅거림)을 걸러내는 필터 작동 함수
+        async function startNoiseFilter() {
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaStreamSource = audioContext.createMediaStreamSource(stream);
+
+                // High-pass Filter 생성 (설정한 주파수보다 낮은 대역인 선풍기 소음 등을 깎아냄)
+                biquadFilter = audioContext.createBiquadFilter();
+                biquadFilter.type = "highpass";
+                biquadFilter.frequency.setValueAtTime(300, audioContext.currentTime); // 300Hz 이하 소음 차단
+
+                mediaStreamSource.connect(biquadFilter);
+                // 필터링된 오디오 스트림 유지
+            } catch (e) {
+                console.error("마이크 노이즈 필터 초기화 실패:", e);
+            }
+        }
+
+        function stopNoiseFilter() {
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.suspend();
             }
         }
 
@@ -116,15 +144,6 @@
             utterance.lang = 'ko-KR';
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
-            
-            utterance.onend = () => {
-                if (currentMode === 'voice' && !isListening) {
-                    setTimeout(() => {
-                        startVoiceInput();
-                    }, 300);
-                }
-            };
-
             window.speechSynthesis.speak(utterance);
         }
 
@@ -137,21 +156,28 @@
 
             const rec = new SpeechRecognition();
             rec.lang = 'ko-KR';
-            rec.interimResults = false;
-            rec.maxAlternatives = 1;
+            rec.interimResults = true;
+            rec.continuous = true;     
 
             rec.onstart = () => {
                 isListening = true;
+                finalTranscript = '';
                 const micBtn = document.getElementById("micBtn");
                 micBtn.style.background = "#ff0055";
                 micBtn.style.color = "#fff";
-                micBtn.innerText = "🔴 듣고 있는 중...";
+                micBtn.innerText = "🔴 듣고 있습니다... (다 말씀하시면 다시 클릭)";
             };
 
             rec.onresult = (event) => {
-                const speechResult = event.results[0][0].transcript;
-                document.getElementById("tempInput").value = speechResult;
-                fetchToGemma(speechResult); // 인식된 텍스트로 바로 전송
+                let interim = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
+                }
+                document.getElementById("tempInput").value = finalTranscript + interim;
             };
 
             rec.onerror = (event) => {
@@ -163,6 +189,11 @@
             rec.onend = () => {
                 isListening = false;
                 resetMicButton();
+                const completeText = document.getElementById("tempInput").value.trim();
+                if (completeText) {
+                    document.getElementById("tempInput").value = "";
+                    fetchToGemma(completeText);
+                }
             };
 
             return rec;
@@ -172,7 +203,7 @@
             const micBtn = document.getElementById("micBtn");
             micBtn.style.background = "transparent";
             micBtn.style.color = "#00f0ff";
-            micBtn.innerText = "🎤 말하기";
+            micBtn.innerText = "🎤 말씀하시려면 클릭하세요";
         }
 
         function toggleVoiceInput() {
@@ -182,31 +213,14 @@
             }
 
             if (isListening) {
-                recognition.stop();
+                recognition.stop(); 
             } else {
-                startVoiceInput();
-            }
-        }
-
-        function startVoiceInput() {
-            if (!recognition) {
-                recognition = initSpeechRecognition();
-                if (!recognition) return;
-            }
-            if (!isListening && currentMode === 'voice') {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    console.error(e);
-                }
+                if (window.speechSynthesis) window.speechSynthesis.cancel(); 
+                recognition.start();
             }
         }
 
         async function fetchToGemma(userQuestion) {
-            if (recognition && isListening) {
-                recognition.stop();
-            }
-
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
             responseBox.innerHTML = "<div>사고 로직 가동 중...</div>";
@@ -221,7 +235,6 @@
                 if (!response.ok) throw new Error("서버 통신 오류");
 
                 const result = await response.json();
-                
                 let rawText = result.choices[0].text;
                 rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
                 
@@ -229,10 +242,8 @@
                 if (!jsonMatch) throw new Error("응답에서 데이터를 찾을 수 없습니다.");
                 
                 const data = new Function(`return ${jsonMatch[0]}`)();
-                console.log("최종 파싱 데이터:", data); 
-
-                responseBox.innerHTML = `<div>${data.reply}</div>`;
                 
+                responseBox.innerHTML = `<div>${data.reply}</div>`;
                 if (data.reply) {
                     speakText(data.reply);
                 }
