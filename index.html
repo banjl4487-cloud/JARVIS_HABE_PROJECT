@@ -15,6 +15,7 @@
             position: relative; width: 250px; height: 250px; display: flex;
             justify-content: center; align-items: center; z-index: 10;
             filter: drop-shadow(0 0 20px #00f0ff);
+            transition: all 0.3s ease;
         }
         #jarvis-core {
             width: 100%; height: 100%; border-radius: 50%; border: 4px solid #00f0ff;
@@ -66,7 +67,7 @@
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
                style="padding: 12px; width: 50%; max-width: 350px; border-radius: 8px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
         <button id="sendBtn" onclick="sendTextCommand()" style="padding: 12px 20px; margin-left: 8px; background: #00f0ff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">전송</button>
-        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 15px 30px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1.1rem;">🎤 말씀하시려면 클릭하세요</button>
+        <button id="micBtn" onclick="toggleVoiceInput()" style="display: none; padding: 15px 30px; background: transparent; color: #00f0ff; border: 1px solid #00f0ff; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 1.1rem;">👏 박수를 치거나 클릭하세요</button>
     </div>
 
     <script>
@@ -75,10 +76,13 @@
         let isListening = false;
         let finalTranscript = '';
         
-        // 잡음 제거(노이즈 필터링)를 위한 변수
+        // 🎙️ 목소리 정제 2중 오디오 필터 변수
         let audioContext = null;
         let mediaStreamSource = null;
-        let biquadFilter = null;
+        let highPassFilter = null; // 1차 방어선: 선풍기 등 저주파 잡음 커팅
+        let voiceBoostFilter = null; // 2차 방어선: 사람 목소리 명료도(중고역대) 집중 부스팅 및 잡음 억제
+        let analyser = null;
+        let isDualPipelineActive = false;
 
         function switchMode(mode) {
             currentMode = mode;
@@ -92,7 +96,7 @@
             if (recognition && isListening) {
                 recognition.stop();
             }
-            stopNoiseFilter();
+            stopVoicePipeline();
 
             if (mode === 'text') {
                 textBtn.classList.add('active');
@@ -106,35 +110,97 @@
                 inputField.style.display = 'none';
                 sendBtn.style.display = 'none';
                 micBtn.style.display = 'inline-block';
-                startNoiseFilter(); // 음성 모드 진입 시 마이크 노이즈 필터 대기
+                
+                // 음성 모드 진입 시 2중 목소리 정제 파이프라인 가동
+                startVoicePipeline();
             }
         }
 
-        // Web Audio API를 이용해 선풍기 바람 같은 저주파 소음(웅웅거림)을 걸러내는 필터 작동 함수
-        async function startNoiseFilter() {
+        // 🛡️ [2중 목소리 정제 파이프라인] 구현
+        async function startVoicePipeline() {
             try {
                 if (!audioContext) {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 }
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaStreamSource = audioContext.createMediaStreamSource(stream);
 
-                // High-pass Filter 생성 (설정한 주파수보다 낮은 대역인 선풍기 소음 등을 깎아냄)
-                biquadFilter = audioContext.createBiquadFilter();
-                biquadFilter.type = "highpass";
-                biquadFilter.frequency.setValueAtTime(300, audioContext.currentTime); // 300Hz 이하 소음 차단
+                // [1차 방어선] High-pass Filter: 300Hz 이하의 웅웅거리는 선풍기/팬 소음 원천 차단
+                highPassFilter = audioContext.createBiquadFilter();
+                highPassFilter.type = "highpass";
+                highPassFilter.frequency.setValueAtTime(300, audioContext.currentTime);
 
-                mediaStreamSource.connect(biquadFilter);
-                // 필터링된 오디오 스트림 유지
+                // [2차 방어선] Peaking Filter (Voice Boost): 사람 목소리가 선명하게 들리는 대역(약 1500Hz)을 강조하여 STT 인식률 극대화
+                voiceBoostFilter = audioContext.createBiquadFilter();
+                voiceBoostFilter.type = "peaking";
+                voiceBoostFilter.frequency.setValueAtTime(1500, audioContext.currentTime);
+                voiceBoostFilter.Q.setValueAtTime(1.0, audioContext.currentTime);
+                voiceBoostFilter.gain.setValueAtTime(5.0, audioContext.currentTime); // 목소리 대역 5dB 부스팅
+
+                // 박수 및 볼륨 감지용 분석기
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+
+                // [직렬 연결 구조]: 마이크 ➡️ 1차 필터(잡음제거) ➡️ 2차 필터(목소리강화) ➡️ 분석기
+                mediaStreamSource.connect(highPassFilter);
+                highPassFilter.connect(voiceBoostFilter);
+                voiceBoostFilter.connect(analyser);
+
+                isDualPipelineActive = true;
+                monitorVoiceInput(); // 박수 및 볼륨 트리거 모니터링 시작
             } catch (e) {
-                console.error("마이크 노이즈 필터 초기화 실패:", e);
+                console.error("2중 목소리 파이프라인 초기화 실패:", e);
             }
         }
 
-        function stopNoiseFilter() {
+        function stopVoicePipeline() {
+            isDualPipelineActive = false;
             if (audioContext && audioContext.state !== 'closed') {
                 audioContext.suspend();
             }
+        }
+
+        // 박수 소리 및 유효 입력 감지 루프
+        function monitorVoiceInput() {
+            if (!isDualPipelineActive || !analyser) return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+            }
+            let average = sum / dataArray.length;
+
+            // 박수 소리 등 순간적 충격음 감지 시 준비 상태로 진입
+            if (average > 45 && !isListening && currentMode === 'voice') {
+                triggerJarvisReady();
+            }
+
+            if (isDualPipelineActive) {
+                requestAnimationFrame(monitorVoiceInput);
+            }
+        }
+
+        function triggerJarvisReady() {
+            const micBtn = document.getElementById("micBtn");
+            const coreWrapper = document.getElementById("jarvis-core-wrapper");
+            
+            coreWrapper.style.filter = "drop-shadow(0 0 35px #ff0055)";
+            micBtn.style.background = "#ff0055";
+            micBtn.style.color = "#fff";
+            micBtn.innerText = "🔴 음성 정제 중! 말씀하세요...";
+
+            setTimeout(() => {
+                coreWrapper.style.filter = "drop-shadow(0 0 20px #00f0ff)";
+            }, 500);
+
+            startVoiceRecognitionProcess();
         }
 
         function speakText(text) {
@@ -144,6 +210,13 @@
             utterance.lang = 'ko-KR';
             utterance.rate = 1.0;
             utterance.pitch = 1.0;
+            
+            utterance.onend = () => {
+                if (currentMode === 'voice' && !isListening) {
+                    resetMicButton();
+                }
+            };
+
             window.speechSynthesis.speak(utterance);
         }
 
@@ -203,7 +276,22 @@
             const micBtn = document.getElementById("micBtn");
             micBtn.style.background = "transparent";
             micBtn.style.color = "#00f0ff";
-            micBtn.innerText = "🎤 말씀하시려면 클릭하세요";
+            micBtn.innerText = "👏 박수를 치거나 클릭하세요";
+        }
+
+        function startVoiceRecognitionProcess() {
+            if (!recognition) {
+                recognition = initSpeechRecognition();
+                if (!recognition) return;
+            }
+            if (!isListening && currentMode === 'voice') {
+                try {
+                    if (window.speechSynthesis) window.speechSynthesis.cancel();
+                    recognition.start();
+                } catch (e) {
+                    console.error(e);
+                }
+            }
         }
 
         function toggleVoiceInput() {
@@ -215,12 +303,15 @@
             if (isListening) {
                 recognition.stop(); 
             } else {
-                if (window.speechSynthesis) window.speechSynthesis.cancel(); 
-                recognition.start();
+                triggerJarvisReady();
             }
         }
 
         async function fetchToGemma(userQuestion) {
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
             responseBox.innerHTML = "<div>사고 로직 가동 중...</div>";
