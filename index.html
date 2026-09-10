@@ -81,7 +81,7 @@
         <input type="text" id="tempInput" placeholder="시스템 명령어 입력..." 
                style="padding: 12px; width: 40%; max-width: 350px; border-radius: 4px; border: 1px solid #00f0ff; background: rgba(0,0,0,0.7); color: #00f0ff; outline: none;">
         <button id="sendBtn" onclick="sendTextCommand()" class="cyber-btn" style="background: #00f0ff; color: #030712;">전송</button>
-        <button id="micBtn" onclick="toggleAutoToManual()" class="cyber-btn" style="display: none;">MIC MANUAL</button>
+        <button id="micBtn" onclick="toggleManualVoice()" class="cyber-btn" style="display: none;">MIC MANUAL</button>
     </div>
 
     <script>
@@ -94,7 +94,8 @@
         let highPassFilter = null;
         let voiceBoostFilter = null;
         let isWakeUpActive = false;
-        let isManualMode = false;
+        let isManualActive = false;
+        let silenceTimer = null; // ⏱️ 2~3초 침묵 감지용 타이머
 
         const canvas = document.getElementById("jarvisCanvas");
         const ctx = canvas.getContext("2d");
@@ -157,13 +158,9 @@
 
         function setCoreState(state) {
             const canvasElem = document.getElementById("jarvisCanvas");
-            if (state === 'LISTENING') {
-                coreColor = "#00ff66"; 
-                waveIntensity = 0.25;  
-                canvasElem.style.filter = "drop-shadow(0 0 25px rgba(0, 255, 102, 0.8))";
-            } else if (state === 'TRIGGERED') {
+            if (state === 'ACTIVE') {
                 coreColor = "#ff0055"; 
-                waveIntensity = 0.6;   
+                waveIntensity = 0.5;   
                 canvasElem.style.filter = "drop-shadow(0 0 35px rgba(255, 0, 85, 0.9))";
             } else {
                 coreColor = "#00f0ff"; 
@@ -181,14 +178,16 @@
             const sendBtn = document.getElementById("sendBtn");
 
             if (window.speechSynthesis) window.speechSynthesis.cancel();
+            if (silenceTimer) clearTimeout(silenceTimer);
             
             if (recognition) {
                 try { recognition.stop(); } catch(e){}
                 recognition = null;
             }
             isListening = false;
-            isManualMode = false;
+            isManualActive = false;
             stopVoiceSystem();
+            setCoreState('IDLE');
 
             if (mode === 'text') {
                 textBtn.classList.add('active');
@@ -196,7 +195,6 @@
                 inputField.style.display = 'inline-block';
                 sendBtn.style.display = 'inline-block';
                 micBtn.style.display = 'none';
-                setCoreState('IDLE');
             } else {
                 voiceBtn.classList.add('active');
                 textBtn.classList.remove('active');
@@ -241,6 +239,7 @@
 
         function stopVoiceSystem() {
             isWakeUpActive = false;
+            if (silenceTimer) clearTimeout(silenceTimer);
             setCoreState('IDLE');
             if (audioContext && audioContext.state !== 'closed') audioContext.suspend();
         }
@@ -251,11 +250,12 @@
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'ko-KR';
             
-            utterance.onstart = () => setCoreState('TRIGGERED');
+            utterance.onstart = () => setCoreState('ACTIVE');
             utterance.onend = () => {
+                isManualActive = false;
                 setCoreState('IDLE');
-                // 수동 모드일 때는 대답이 끝난 후에도 절대 자동 복귀 안 함 (사용자가 직접 다시 버튼을 눌러야만 함)
-                if (currentMode === 'voice' && isWakeUpActive && !isManualMode && !isListening) {
+                document.getElementById("micBtn").innerText = "MIC MANUAL";
+                if (currentMode === 'voice' && isWakeUpActive) {
                     setTimeout(() => startAutoWakeUp(), 500);
                 }
             };
@@ -263,8 +263,9 @@
             window.speechSynthesis.speak(utterance);
         }
 
+        // 🤖 자동 모드 ("자비스" 감지 후 2~3초 침묵 시 자동 종료 및 전송)
         function startAutoWakeUp() {
-            if (currentMode !== 'voice' || !isWakeUpActive || isManualMode || isListening) return;
+            if (currentMode !== 'voice' || !isWakeUpActive || isManualActive || isListening) return;
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) return;
@@ -276,21 +277,26 @@
 
             recognition.onstart = () => {
                 isListening = true;
-                setCoreState('LISTENING');
+                setCoreState('IDLE');
             };
 
             recognition.onresult = (event) => {
-                if (isManualMode) return;
+                if (isManualActive) return;
                 let transcript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     transcript += event.results[i][0].transcript;
                 }
                 
+                // 1단계: "자비스" 웨이크 워드 감지
                 if (transcript.includes("자비스")) {
-                    recognition.stop();
-                    window.jarvisTriggered = true;
-                    setCoreState('TRIGGERED');
-                    fetchToGemma(transcript);
+                    setCoreState('ACTIVE'); // 🔴 빨간색 전환
+                    
+                    // ⏱️ 2.5초 동안 추가 음성 입력이 없으면 말을 마친 것으로 판단
+                    if (silenceTimer) clearTimeout(silenceTimer);
+                    silenceTimer = setTimeout(() => {
+                        recognition.stop();
+                        fetchToGemma(transcript);
+                    }, 2500); // 2.5초 침묵 대기
                 }
             };
 
@@ -301,91 +307,85 @@
 
             recognition.onend = () => {
                 isListening = false;
-                if (currentMode === 'voice' && isWakeUpActive && !isManualMode && !window.jarvisTriggered) {
+                if (currentMode === 'voice' && isWakeUpActive && !isManualActive) {
                     setTimeout(() => startAutoWakeUp(), 400);
                 }
             };
 
             try {
-                window.jarvisTriggered = false;
                 recognition.start();
             } catch (e) {
                 isListening = false;
             }
         }
 
-        // 🔒 수동 제어: 버튼을 누를 때만 딱 한 번 인식하고, 재클릭하기 전에는 절대 추가 인식 금지
-        function toggleAutoToManual() {
-            if (isManualMode) {
-                // 수동 해제 (다시 자동 모드로 복귀)
-                isManualMode = false;
+        // 🖱️ 수동 모드 (버튼 클릭으로 시작, 재클릭 전까지 락 유지)
+        function toggleManualVoice() {
+            if (isManualActive) {
+                isManualActive = false;
+                if (silenceTimer) clearTimeout(silenceTimer);
                 if (recognition) {
                     try { recognition.stop(); } catch(e){}
                 }
                 document.getElementById("micBtn").innerText = "MIC MANUAL";
                 setCoreState('IDLE');
-                startAutoWakeUp();
+                if (currentMode === 'voice' && isWakeUpActive) startAutoWakeUp();
                 return;
             }
 
-            // 수동 모드 진입 (자동 대기 완전 차단)
-            isManualMode = true;
+            isManualActive = true;
             if (recognition) {
                 try { recognition.stop(); } catch(e){}
             }
 
+            setCoreState('ACTIVE');
+            document.getElementById("micBtn").innerText = "LISTENING (LOCKED)";
+
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
                 alert("음성 인식을 지원하지 않는 브라우저입니다.");
+                isManualActive = false;
+                setCoreState('IDLE');
                 return;
             }
 
             recognition = new SpeechRecognition();
             recognition.lang = 'ko-KR';
-            recognition.interimResults = false; // 중간 조각 무시, 완성된 결과만 받음
-            recognition.continuous = false;   // 단건 입력
-
-            recognition.onstart = () => {
-                isListening = true;
-                setCoreState('TRIGGERED');
-                document.getElementById("micBtn").innerText = "LISTENING (LOCKED)";
-            };
+            recognition.interimResults = false;
+            recognition.continuous = false;
 
             recognition.onresult = (event) => {
-                if (!isManualMode) return;
+                if (!isManualActive) return;
                 let transcript = event.results[0][0].transcript.trim();
                 
-                // 🛑 의미 없는 1~2글자 잡음("아니" 등)은 오인식으로 간주하고 무시함
                 if (transcript.length < 2) {
-                    console.log("짧은 잡음 무시됨:", transcript);
+                    isManualActive = false;
+                    setCoreState('IDLE');
+                    document.getElementById("micBtn").innerText = "MIC MANUAL";
                     return;
                 }
 
-                setCoreState('TRIGGERED');
                 fetchToGemma(transcript);
             };
 
             recognition.onerror = () => {
                 isListening = false;
+                isManualActive = false;
                 setCoreState('IDLE');
-                if (isManualMode) {
-                    document.getElementById("micBtn").innerText = "MIC MANUAL (LOCKED)";
-                }
+                document.getElementById("micBtn").innerText = "MIC MANUAL";
             };
 
             recognition.onend = () => {
                 isListening = false;
-                // 🔒 인식이 끝나도 절대 자동 재시작 안 함. 사용자가 다시 버튼을 누를 때까지 영구 대기(Lock)
-                if (isManualMode) {
-                    setCoreState('IDLE');
-                    document.getElementById("micBtn").innerText = "MIC MANUAL (LOCKED)";
-                }
             };
 
             try {
                 recognition.start();
             } catch (e) {
                 isListening = false;
+                isManualActive = false;
+                setCoreState('IDLE');
+                document.getElementById("micBtn").innerText = "MIC MANUAL";
             }
         }
 
@@ -393,7 +393,7 @@
             if (recognition) {
                 try { recognition.stop(); } catch(e){}
             }
-            isListening = false;
+            if (silenceTimer) clearTimeout(silenceTimer);
 
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
@@ -420,6 +420,10 @@
                 responseBox.innerHTML = `<div>${data.reply}</div>`;
                 if (data.reply) {
                     speakText(data.reply);
+                } else {
+                    isManualActive = false;
+                    setCoreState('IDLE');
+                    document.getElementById("micBtn").innerText = "MIC MANUAL";
                 }
                 
                 if (data.status === "OPEN") {
