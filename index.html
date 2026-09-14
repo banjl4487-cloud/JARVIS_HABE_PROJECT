@@ -80,7 +80,7 @@
     <script>
         let inputRecognition = null;
         let isInputRecording = false;
-        let isProcessing = false; // 서버 통신 및 응답 중 상태 플래그
+        let isProcessing = false;
 
         const canvas = document.getElementById("jarvisCanvas");
         const ctx = canvas.getContext("2d");
@@ -155,80 +155,84 @@
         }
 
         function toggleInputSpeech() {
+            console.log("MIC 버튼 클릭됨");
             const textMicBtn = document.getElementById("textMicBtn");
             const inputField = document.getElementById("tempInput");
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
+                alert("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬을 사용해 주세요.");
                 return;
             }
 
             if (isInputRecording) {
-                if (inputRecognition) inputRecognition.stop();
+                if (inputRecognition) {
+                    try { inputRecognition.stop(); } catch(e) {}
+                }
                 resetInputMicState();
                 return;
             }
 
-            inputRecognition = new SpeechRecognition();
-            inputRecognition.lang = 'ko-KR';
-            inputRecognition.interimResults = true;
-            inputRecognition.continuous = false;
-
-            inputRecognition.onstart = () => {
-                isInputRecording = true;
-                textMicBtn.classList.add('recording');
-                textMicBtn.innerText = "⏹️ STOP";
-                setCoreState('ACTIVE');
-            };
-
-            inputRecognition.onresult = (event) => {
-                let interimTranscript = '';
-                let finalTranscript = '';
-
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
-                    } else {
-                        interimTranscript += event.results[i][0].transcript;
-                    }
-                }
-
-                if (interimTranscript) {
-                    inputField.value = interimTranscript;
-                }
-
-                if (finalTranscript.trim()) {
-                    inputField.value = finalTranscript.trim();
-                    if (inputRecognition) inputRecognition.stop();
-                }
-            };
-
-            inputRecognition.onerror = (e) => {
-                console.error("음성 인식 오류:", e);
-                resetInputMicState();
-            };
-
-            inputRecognition.onend = () => {
-                // 마이크 버튼 UI만 기본으로 돌리되, 처리 중(isProcessing)일 때는 코어 색상(빨간색)을 유지함
-                isInputRecording = false;
-                const textMicBtn = document.getElementById("textMicBtn");
-                textMicBtn.classList.remove('recording');
-                textMicBtn.innerText = "🎤 MIC";
-                
-                // 입력창에 텍스트가 있으면 전송 실행
-                if (inputField.value.trim() !== "") {
-                    setTimeout(() => {
-                        sendTextCommand();
-                    }, 200);
-                } else if (!isProcessing) {
-                    setCoreState('IDLE');
-                }
-            };
-
             try {
+                inputRecognition = new SpeechRecognition();
+                inputRecognition.lang = 'ko-KR';
+                inputRecognition.interimResults = true;
+                inputRecognition.continuous = false;
+
+                inputRecognition.onstart = () => {
+                    console.log("음성 인식 시작됨");
+                    isInputRecording = true;
+                    textMicBtn.classList.add('recording');
+                    textMicBtn.innerText = "⏹️ STOP";
+                    setCoreState('ACTIVE');
+                };
+
+                inputRecognition.onresult = (event) => {
+                    let interimTranscript = '';
+                    let finalTranscript = '';
+
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interimTranscript += event.results[i][0].transcript;
+                        }
+                    }
+
+                    if (interimTranscript) {
+                        inputField.value = interimTranscript;
+                    }
+
+                    if (finalTranscript.trim()) {
+                        inputField.value = finalTranscript.trim();
+                        try { inputRecognition.stop(); } catch(e) {}
+                    }
+                };
+
+                inputRecognition.onerror = (e) => {
+                    console.error("음성 인식 오류 발생:", e.error);
+                    resetInputMicState();
+                };
+
+                inputRecognition.onend = () => {
+                    console.log("음성 인식 종료됨, 입력값:", inputField.value);
+                    isInputRecording = false;
+                    textMicBtn.classList.remove('recording');
+                    textMicBtn.innerText = "🎤 MIC";
+                    
+                    if (inputField.value.trim() !== "") {
+                        setTimeout(() => {
+                            sendTextCommand();
+                        }, 200);
+                    } else if (!isProcessing) {
+                        setCoreState('IDLE');
+                    }
+                };
+
                 inputRecognition.start();
-            } catch (e) {
+            } catch (err) {
+                console.error("음성 인식 초기화 실패:", err);
+                alert("마이크를 실행할 수 없습니다. 마이크 연결 및 권한을 확인해주세요.");
                 resetInputMicState();
             }
         }
@@ -268,7 +272,7 @@
 
         async function fetchToGemma(userQuestion) {
             isProcessing = true;
-            setCoreState('ACTIVE'); // 서버 처리 및 응답 중에는 계속 빨간색 코어 유지
+            setCoreState('ACTIVE');
 
             const responseBox = document.getElementById("response-box");
             responseBox.style.display = "block";
@@ -295,7 +299,7 @@
                 responseBox.innerHTML = `<div>${data.reply}</div>`;
                 
                 if (data.reply) {
-                    speakText(data.reply); // 음성 출력이 끝날 때 IDLE로 복귀함
+                    speakText(data.reply);
                 } else {
                     isProcessing = false;
                     setCoreState('IDLE');
