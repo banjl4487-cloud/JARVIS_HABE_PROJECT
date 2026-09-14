@@ -161,7 +161,7 @@
 
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                alert("이 브라우저는 음성 인식을 지원하지 않습니다. 크롬을 사용해 주세요.");
+                alert("이 브라우저는 음성 인식을 지원하지 않습니다.");
                 return;
             }
 
@@ -177,7 +177,7 @@
                 inputRecognition = new SpeechRecognition();
                 inputRecognition.lang = 'ko-KR';
                 inputRecognition.interimResults = true;
-                inputRecognition.continuous = false;
+                inputRecognition.maxAlternatives = 1;
 
                 inputRecognition.onstart = () => {
                     console.log("음성 인식 시작됨");
@@ -185,27 +185,16 @@
                     textMicBtn.classList.add('recording');
                     textMicBtn.innerText = "⏹️ STOP";
                     setCoreState('ACTIVE');
+                    inputField.placeholder = "듣고 있는 중...";
                 };
 
                 inputRecognition.onresult = (event) => {
-                    let interimTranscript = '';
-                    let finalTranscript = '';
-
+                    let transcript = '';
                     for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        } else {
-                            interimTranscript += event.results[i][0].transcript;
-                        }
+                        transcript += event.results[i][0].transcript;
                     }
-
-                    if (interimTranscript) {
-                        inputField.value = interimTranscript;
-                    }
-
-                    if (finalTranscript.trim()) {
-                        inputField.value = finalTranscript.trim();
-                        try { inputRecognition.stop(); } catch(e) {}
+                    if (transcript.trim()) {
+                        inputField.value = transcript.trim();
                     }
                 };
 
@@ -219,6 +208,7 @@
                     isInputRecording = false;
                     textMicBtn.classList.remove('recording');
                     textMicBtn.innerText = "🎤 MIC";
+                    inputField.placeholder = "시스템 명령어 입력...";
                     
                     if (inputField.value.trim() !== "") {
                         setTimeout(() => {
@@ -232,7 +222,6 @@
                 inputRecognition.start();
             } catch (err) {
                 console.error("음성 인식 초기화 실패:", err);
-                alert("마이크를 실행할 수 없습니다. 마이크 연결 및 권한을 확인해주세요.");
                 resetInputMicState();
             }
         }
@@ -242,6 +231,8 @@
             const textMicBtn = document.getElementById("textMicBtn");
             textMicBtn.classList.remove('recording');
             textMicBtn.innerText = "🎤 MIC";
+            const inputField = document.getElementById("tempInput");
+            if (inputField) inputField.placeholder = "시스템 명령어 입력...";
             if (!isProcessing) {
                 setCoreState('IDLE');
             }
