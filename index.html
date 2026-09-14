@@ -171,8 +171,8 @@
 
             inputRecognition = new SpeechRecognition();
             inputRecognition.lang = 'ko-KR';
-            inputRecognition.interimResults = true; // 실시간 인식 텍스트 보이기
-            inputRecognition.continuous = false;    // 단일 명령어 처리 후 자동 종료
+            inputRecognition.interimResults = true; // 실시간 텍스트 표시
+            inputRecognition.continuous = false;    // 단일 명령 처리
 
             inputRecognition.onstart = () => {
                 isInputRecording = true;
@@ -193,14 +193,15 @@
                     }
                 }
 
+                // 1. 말하는 중에는 실시간으로 입력창에 텍스트 표시
                 if (interimTranscript) {
                     inputField.value = interimTranscript;
                 }
 
+                // 2. 문장이 완성되면 입력창에 채우고 음성 인식 세션 종료 요청 (onend에서 안전 전송)
                 if (finalTranscript.trim()) {
                     inputField.value = finalTranscript.trim();
                     if (inputRecognition) inputRecognition.stop();
-                    sendTextCommand();
                 }
             };
 
@@ -209,8 +210,16 @@
                 resetInputMicState();
             };
 
+            // 3. 음성 인식이 완전히 종료된 후 안전하게 백엔드로 자동 전송!
             inputRecognition.onend = () => {
                 resetInputMicState();
+                
+                // 입력창에 텍스트가 있으면 0.2초 후 전송
+                if (inputField.value.trim() !== "") {
+                    setTimeout(() => {
+                        sendTextCommand();
+                    }, 200);
+                }
             };
 
             try {
