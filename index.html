@@ -165,13 +165,14 @@
 
             if (isInputRecording) {
                 if (inputRecognition) inputRecognition.stop();
+                resetInputMicState();
                 return;
             }
 
             inputRecognition = new SpeechRecognition();
             inputRecognition.lang = 'ko-KR';
-            inputRecognition.interimResults = false;
-            inputRecognition.continuous = false;
+            inputRecognition.interimResults = true; // 실시간 인식 텍스트 보이기
+            inputRecognition.continuous = false;    // 단일 명령어 처리 후 자동 종료
 
             inputRecognition.onstart = () => {
                 isInputRecording = true;
@@ -180,12 +181,26 @@
                 setCoreState('ACTIVE');
             };
 
-            /* ★ 핵심 변경 포인트: 인식 완료 시 즉시 자동 제출 ★ */
             inputRecognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript.trim();
-                if (transcript) {
-                    inputField.value = transcript;
-                    sendTextCommand(); // 자동으로 자비스 백엔드로 전송
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                if (interimTranscript) {
+                    inputField.value = interimTranscript;
+                }
+
+                if (finalTranscript.trim()) {
+                    inputField.value = finalTranscript.trim();
+                    if (inputRecognition) inputRecognition.stop();
+                    sendTextCommand();
                 }
             };
 
